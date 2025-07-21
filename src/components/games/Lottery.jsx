@@ -1,9 +1,13 @@
 import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
+// import useWalletBalance from "../hooks/useWalletBalance";
 
 import Amount from "../Amount";
 
 function Lottery() {
+
+
+
   const [timeLeft, setTimeLeft] = useState(30);
   const [firstNumber, setFirstNumber] = useState(3);
   const [secondNumber, setSecondNumber] = useState(0);
@@ -30,6 +34,9 @@ function Lottery() {
   const [numberResultMessage, setNumberResultMessage] = useState("");
   const [colorResultMessage, setColorResultMessage] = useState("");
 
+  //wallet
+  // const { balance, loading, error, refetch } = useWalletBalance();
+
   //amount selected
   const [showAmountBox, setShowAmountBox] = useState(false);
   const [totalAmount, setTotalAmount] = useState(0); // 💰 For backend use
@@ -39,26 +46,36 @@ function Lottery() {
   const colorAmountRef = useRef(null);
   const numberAmountRef = useRef(null);
 
-  //BET AMOUNT
-  const [betAmount, setBetAmount] = useState(1000);
+  // useEffect(() => {
+  //   refetch();
+  // }, [refetch]);
 
-  const API_URL = import.meta.env.VITE_REACT_APP_API_URL;
+     const API_URL = import.meta.env.VITE_REACT_APP_API_URL;
 
   // Countdown Timer
   useEffect(() => {
     if (!hasMounted.current) {
       hasMounted.current = true;
+      // console.log("🚫 First mount — skipping countdown");
       return;
     }
 
     let timer;
     if (isTimerRunning) {
       timer = setInterval(() => {
+        // console.log("✅ Starting countdown...");
         setTimeLeft((prev) => {
+          // console.log("🕒 timeLeft:", prev);
           if (prev <= 1) {
             clearInterval(timer);
             setIsTimerRunning(false);
-            handleRoundEnd();
+            // console.log("⏰ Timer finished");
+            try {
+              handleRoundEnd();
+            } catch (e) {
+              // console.error("Error in handleRoundEnd:", e);
+            }
+
             return 0;
           }
           return prev - 1;
@@ -66,92 +83,51 @@ function Lottery() {
       }, 1000);
     }
 
-    return () => clearInterval(timer);
+    return () => {
+      // console.log("🧹 Cleanup: clearing timer");
+      clearInterval(timer);
+    };
   }, [isTimerRunning]);
 
-  // console.log("API_URL = ", API_URL);
+  // console.log("isTimerRunning:", isTimerRunning);
 
-  const handleRoundEnd = async () => {
-    if (isHandlingRound.current) return;
-    isHandlingRound.current = true;
+const handleRoundEnd = async () => {
+  if (isHandlingRound.current) return;
+  isHandlingRound.current = true;
 
-    // console.log("📝 User Selections:");
-    // console.log(
-    //   "👉 Big/Small:",
-    //   userChoiceRef.current,
-    //   "| Amount:",
-    //   bigSmallAmountRef.current
-    // );
-    // console.log(
-    //   "🎨 Color:",
-    //   selectedColorRef.current,
-    //   "| Amount:",
-    //   colorAmountRef.current
-    // );
-    // console.log(
-    //   "🔢 Number:",
-    //   selectedNumberRef.current,
-    //   "| Amount:",
-    //   numberAmountRef.current
-    // );
+  setIsTimerRunning(false); // ❗ Force countdown to stop
+  setTimeLeft(0);
 
-    try {
-      const res = await fetch(`${API_URL}/api/game/play`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-        body: JSON.stringify({
-          userChoice: userChoiceRef.current, // e.g. "Big"
-          amount: bigSmallAmountRef.current, // e.g. 10
-          userColor: selectedColorRef.current, // e.g. "Green"
-          colorAmount: colorAmountRef.current, // e.g. 50
-          userNumber: selectedNumberRef.current, // e.g. 8
-          numberAmount: numberAmountRef.current, // e.g. 100
-        }),
-      });
+  // Do your result work here (API call etc.)
 
-      const data = await res.json();
-      console.log("Auto generated:", data);
+  // Then after result shows (e.g. 5 sec)
+  setTimeout(() => {
+    // Reset game state
+    setResultMessage("");
+    setIsButtonDisabled(false);
+    setSelectedColor(null);
+    setSelectedNumber(null);
+    userChoiceRef.current = null;
 
-      // Show all results (ALWAYS show backend result)
-      setBigSmallResultMessage(` BIG/SMALL ${data.bigSmallResult.result}`);
-      setNumberResultMessage(`NUMBER ${data.numberResult.result}`);
-      setColorResultMessage(`COLOR ${data.colorResult.result}`);
+    setBigSmallResultMessage("");
+    setNumberResultMessage("");
+    setColorResultMessage("");
 
-      console.log("result = ", data.result);
+    selectedColorRef.current = null;
+    selectedNumberRef.current = null;
+    setSelectedColor(null);
+    setSelectedNumber(null);
 
-      fetchHistory(currentPage); // ✅ Fetch latest history for current page
+    bigSmallAmountRef.current = null;
+    colorAmountRef.current = null;
+    numberAmountRef.current = null;
 
-      setTimeout(() => {
-        setResultMessage("");
-        setIsButtonDisabled(false);
-        setSelectedColor(null);
-        setSelectedNumber(null);
-        userChoiceRef.current = null;
-        setTimeLeft(30);
-        setIsTimerRunning(true);
-        isHandlingRound.current = false;
+    setTimeLeft(30); // ⏱️ Restart countdown
+    setIsTimerRunning(true); // ✅ This now re-triggers the effect
+    isHandlingRound.current = false;
+  }, 5000);
+};
 
-        setBigSmallResultMessage("");
-        setNumberResultMessage("");
-        setColorResultMessage("");
-
-        selectedColorRef.current = null;
-        selectedNumberRef.current = null;
-        setSelectedColor(null);
-        setSelectedNumber(null);
-
-        bigSmallAmountRef.current = null;
-        colorAmountRef.current = null;
-        numberAmountRef.current = null;
-      }, 5000);
-    } catch (error) {
-      console.error("Auto play error:", error);
-      isHandlingRound.current = false;
-    }
-  };
 
   useEffect(() => {
     const str = String(timeLeft).padStart(2, "0");
@@ -169,9 +145,11 @@ function Lottery() {
 
   const fetchHistory = async (page = 1) => {
     try {
-      const res = await fetch(`${API_URL}/api/game/history?page=${page}`);
+      const res = await fetch(
+        `${API_URL}/api/game/history?page=${page}`
+      );
       const data = await res.json();
-      // console.log("Fetched History:", data);
+      console.log("Fetched History:", data);
 
       if (Array.isArray(data.history)) {
         setGameHistory(data.history);
@@ -190,6 +168,9 @@ function Lottery() {
   useEffect(() => {
     fetchHistory(currentPage);
   }, [currentPage]);
+
+  // if (loading) return <p>Loading balance...</p>;
+  // if (error) return <p className="text-red-500">Error: {error}</p>;
 
   return (
     <>
@@ -211,7 +192,7 @@ function Lottery() {
       <div className="flex justify-center items-center mb-3 w-full px-4 mt-6 lg:mt-10 ">
         <div className="backdrop-blur-md bg-white/20 rounded-xl px-6 py-3 shadow-lg flex flex-col items-center w-full max-w-2xl">
           <span className="text-2xl font-bold text-gray-100 flex items-center mb-1">
-            <span className="mr-1">₹</span> {betAmount}
+            <span className="mr-1">₹</span> 121
           </span>
           <span className="flex items-center text-gray-300 mb-2 text-sm">
             <i className="fas fa-wallet mr-1"></i> Wallet Balance
@@ -277,6 +258,7 @@ function Lottery() {
         </div>
       </div>
 
+      {/* Result Messages */}
       {/* Result Messages (Sticky Top Message) */}
       <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 space-y-2">
         {bigSmallResultMessage && (
