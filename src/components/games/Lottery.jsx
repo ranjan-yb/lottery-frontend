@@ -63,13 +63,13 @@ function Lottery() {
     let timer;
     if (isTimerRunning) {
       timer = setInterval(() => {
-        // console.log("✅ Starting countdown...");
+        console.log("✅ Starting countdown...");
         setTimeLeft((prev) => {
           // console.log("🕒 timeLeft:", prev);
           if (prev <= 1) {
             clearInterval(timer);
             setIsTimerRunning(false);
-            // console.log("⏰ Timer finished");
+            console.log("⏰ Timer finished");
             try {
               handleRoundEnd();
             } catch (e) {
@@ -84,7 +84,7 @@ function Lottery() {
     }
 
     return () => {
-      // console.log("🧹 Cleanup: clearing timer");
+      console.log("🧹 Cleanup: clearing timer");
       clearInterval(timer);
     };
   }, [isTimerRunning]);
