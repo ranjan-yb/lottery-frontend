@@ -54,11 +54,16 @@ function Lottery() {
 
   // Countdown Timer
   useEffect(() => {
+
+    console.log("📦 Countdown useEffect triggered");
+
     if (!hasMounted.current) {
       hasMounted.current = true;
-      // console.log("🚫 First mount — skipping countdown");
+      console.log("🚫 Skipping countdown on first mount");
       return;
     }
+
+    console.log("🧪 isTimerRunning:", isTimerRunning);
 
     let timer;
     if (isTimerRunning) {
@@ -73,7 +78,7 @@ function Lottery() {
             try {
               handleRoundEnd();
             } catch (e) {
-              // console.error("Error in handleRoundEnd:", e);
+              console.error("Error in handleRoundEnd:", e);
             }
 
             return 0;
