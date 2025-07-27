@@ -3,15 +3,15 @@ import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 
 import Amount from "../Amount";
+import useWalletBalance from "../hooks/useWalletBalance";
 
 function SecondLottery() {
   const API_URL = import.meta.env.VITE_REACT_APP_API_URL;
 
-  localStorage.setItem(
-    "adminToken",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZG1pbklkIjoiNjg4MGZmYjljNmNkZjAwM2EzOTQyOTY3IiwiaWF0IjoxNzUzMjg1NjcxLCJleHAiOjE3NTMzNzIwNzF9.5r8p5FAPrNSgoJK6_mxEhSEzK3YkiBUViGpNTJvxros"
-  ); // ✅ Set it once
-  const token = localStorage.getItem("adminToken"); // ✅ Retrieve it properly
+
+   const { balance, loading, error, refetch } = useWalletBalance();
+
+  const token = localStorage.getItem("token"); // ✅ Retrieve it properly
 
   const [timeLeft, setTimeLeft] = useState(30);
   const [firstNumber, setFirstNumber] = useState(3);
@@ -19,7 +19,6 @@ function SecondLottery() {
 
   const [restart, setRestart] = useState(false);
 
-  const [resultMessage, setResultMessage] = useState("");
   const [isButtonDisabled, setIsButtonDisabled] = useState(false);
   const [gameHistory, setGameHistory] = useState([]);
   const [isTimerRunning, setIsTimerRunning] = useState(true);
@@ -49,6 +48,9 @@ function SecondLottery() {
   //amount selected
   const [showAmountBox, setShowAmountBox] = useState(false);
   const [totalAmount, setTotalAmount] = useState(0); // 💰 For backend use
+
+  // LAST SECONDS
+  const [left25Sec, setLeft25Sec] = useState(false);
 
   // TIME REMAINING
   useEffect(() => {
@@ -104,107 +106,147 @@ function SecondLottery() {
     bigSmallAmountRef.current = null;
     colorAmountRef.current = null;
     numberAmountRef.current = null;
+
+    setLeft25Sec(false);
+
+    resetGameStateBackend();
+
   };
 
+  const lastPayload = useRef(null); // At top of component
   // SEND SELECTED CHOICES TO BACKEND BY (post)
   const sendSelectionToBackend = async () => {
-    // console.log(
-    //   `color Choice = ${selectedColorRef.current} with amount = ${colorAmountRef.current}`
-    // );
-    // console.log(
-    //   `number Choice = ${selectedNumberRef.current} with amount = ${numberAmountRef.current}`
-    // );
-    // console.log(
-    //   `BIG/SMALL Choice = ${selectBigSmallRef.current} with amount = ${bigSmallAmountRef.current}`
-    // );
+    const payload = {
+      last5Sec: true,
+      last25Sec: false,
+    };
+
+    if (selectBigSmallRef.current) {
+      payload.userBigSmall = selectBigSmallRef.current;
+      payload.bigSmallAmount = Number(bigSmallAmountRef.current) || 0;
+    }
+
+    if (selectedColorRef.current) {
+      payload.userColor = selectedColorRef.current;
+      payload.colorAmount = Number(colorAmountRef.current) || 0;
+    }
+
+    if (
+      selectedNumberRef.current !== null &&
+      selectedNumberRef.current !== undefined
+    ) {
+      payload.userNumber = selectedNumberRef.current;
+      payload.numberAmount = Number(numberAmountRef.current) || 0;
+    }
+
+    console.log("📤 Sending /play payload:", payload);
+
+    // Save this for later use
+    lastPayload.current = payload;
 
     try {
-      const payload = {};
-
-      if (selectBigSmallRef.current) {
-        payload.userBigSmall = selectBigSmallRef.current;
-        payload.bigSmallAmount = Number(bigSmallAmountRef.current) || 0;
-      }
-
-      if (selectedColorRef.current) {
-        payload.userColor = selectedColorRef.current;
-        payload.colorAmount = Number(colorAmountRef.current) || 0;
-      }
-
-      if (
-        selectedNumberRef.current !== null &&
-        selectedNumberRef.current !== undefined
-      ) {
-        payload.userNumber = selectedNumberRef.current;
-        payload.numberAmount = Number(numberAmountRef.current) || 0;
-      }
-
-      console.log("Final payload:", payload);
-
       const res = await fetch(`${API_URL}/api/game/play`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, // ✅ Add this
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
 
+      const data = await res.json();
+      console.log("✅ /play result:", data);
+
+      // ✅ Only show message if user placed that bet
+      if (lastPayload.current.userBigSmall) {
+        setBigSmallResultMessage(
+          data.bigSmallResult === "Win"
+            ? "🎉 You Win Big/Small!"
+            : "❌ You Lost Big/Small"
+        );
+      } else {
+        setBigSmallResultMessage(""); // clear
+      }
+
+      if (lastPayload.current.userColor) {
+        setColorResultMessage(
+          data.colorResult === "Win" ? "🎉 You Win Color!" : "❌ You Lost Color"
+        );
+      } else {
+        setColorResultMessage("");
+      }
+
+      if (
+        lastPayload.current.userNumber !== undefined &&
+        lastPayload.current.userNumber !== null
+      ) {
+        setNumberResultMessage(
+          data.numberResult === "Win"
+            ? "🎉 You Win in Number"
+            : "❌ You Lost in Number"
+        );
+      } else {
+        setNumberResultMessage("");
+      }
+
+      await fetchGameHistory(); // refresh results
+      await refetch(); // update wallet
+    } catch (error) {
+      console.log("❌ Error sending /play:", error);
+    }
+  };
+
+  // RESET GAME BACKEND
+  const resetGameStateBackend = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/game/reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
       if (!res.ok) {
-        throw new Error(`Server error: ${res.status}`);
+        throw new Error(`Reset error: ${res.status}`);
       }
 
       const data = await res.json();
-      console.log("Auto generated:", data);
-
-      fetchGameHistory(currentPage); // ✅ Fetch latest history for current page
-
-      // RESULTS MESSAGE
-      if (data.userBigSmall !== undefined && data.userBigSmall !== null) {
-        setBigSmallResultMessage(
-          data.randomChoiceBigSmall === data.userBigSmall
-            ? "Win"
-            : "YOU LOST 🥲"
-        );
-      }
-      if (data.userColor !== undefined && data.userColor !== null) {
-        setColorResultMessage(
-          data.randomChoiceColor === data.userColor ? "Win" : "YOU LOST 🥲"
-        );
-      }
-      if (data.userNumber !== undefined && data.userNumber !== null) {
-        setNumberResultMessage(
-          data.randomChoiceNumber === data.userNumber ? "Win" : "YOU LOST 🥲"
-        );
-      }
+      console.log("✅ Game reset:", data);
     } catch (error) {
-      console.log("error in sending data", error);
+      console.error("❌ error in resetting game", error);
     }
   };
+
   // send choices to backend after everytime after round ends
   useEffect(() => {
-    if (timeLeft === 1) {
+    if (timeLeft === 5) {
       sendSelectionToBackend();
     }
   }, [timeLeft]);
 
   //FETCH GAME HISTORY
+  // ✅ Fetch Game History with safety checks and optional UI updates
   const fetchGameHistory = async (page = 1) => {
     try {
-      const res = await fetch(`${API_URL}/api/game/history?page=${page}`);
+      const res = await fetch(
+        `http://localhost:1000/api/game/history?page=${page}`
+      );
+      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+
       const data = await res.json();
-      console.log("Fetched History:", data);
+      console.log("📜 Fetched History:", data);
 
       if (Array.isArray(data.history)) {
         setGameHistory(data.history);
-        setTotalPages(data.totalPages);
-        setCurrentPage(data.currentPage);
+        setTotalPages(data.totalPages || 1);
+        setCurrentPage(data.currentPage || 1);
       } else {
-        console.error("Invalid history response:", data);
+        console.warn("❌ Unexpected history format:", data);
         setGameHistory([]);
       }
     } catch (error) {
-      console.error("Error fetching history:", error);
+      console.error("🔥 Error fetching history:", error);
       setGameHistory([]);
     }
   };
@@ -239,6 +281,27 @@ function SecondLottery() {
     return () => clearTimeout(timeout);
   }, [bigSmallResultMessage, numberResultMessage, colorResultMessage]);
 
+  // send Time to backend
+  useEffect(() => {
+    if (timeLeft === 25) {
+      setLeft25Sec(true);
+      // console.log("last 5 seconds", left25Sec);
+    }
+  });
+
+  // Time
+  useEffect(() => {
+    if (timeLeft === 25) {
+      setLeft25Sec(true);
+    }
+  }, [timeLeft]);
+
+  // logout 
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    window.location.href = "/login"; // Redirect to login page after logout
+  }
+
   return (
     <>
       {/* <!-- Center: Title -->  */}
@@ -253,13 +316,17 @@ function SecondLottery() {
           </svg>
           Lottery
         </div>
+        <button 
+        onClick={handleLogout}
+        className="px-2 py-1 text-white rounded-lg text-lg bg-red-500">Logout</button>
       </div>
+      
 
       {/* Wallet */}
       <div className="flex justify-center items-center mb-3 w-full px-4 mt-6 lg:mt-10 ">
         <div className="backdrop-blur-md bg-white/20 rounded-xl px-6 py-3 shadow-lg flex flex-col items-center w-full max-w-2xl">
           <span className="text-2xl font-bold text-gray-100 flex items-center mb-1">
-            <span className="mr-1">₹</span> 300
+            <span className="mr-1">₹</span> {balance}
           </span>
           <span className="flex items-center text-gray-300 mb-2 text-sm">
             <i className="fas fa-wallet mr-1"></i> Wallet Balance
@@ -544,24 +611,25 @@ function SecondLottery() {
         {gameHistory.map((item, index) => (
           <div
             key={index}
-            className="grid grid-cols-4 text-sm font-semibold text-white bg-[#1a1a1a] p-2 rounded justify-between text-center"
+            className="grid grid-cols-4 text-sm font-semibold text-white bg-[#1a1a1a] p-2 rounded text-center"
           >
-            <div>{item.period}</div>
-            <div style={{ color: "blue" }}>
+            <div>{item.period || "-"}</div>
+            <div className="text-blue-400">
               {item.randomChoiceNumber ?? "-"}
             </div>
-            <div style={{ color: "yellow" }}>{item.randomChoiceBigSmall}</div>
+            <div className="text-yellow-400">
+              {item.randomChoiceBigSmall || "-"}
+            </div>
             <div
-              style={{
-                color:
-                  item.randomChoiceColor === "Green"
-                    ? "green"
-                    : item.randomChoiceColor === "Purple"
-                    ? "purple"
-                    : item.randomChoiceColor === "Red"
-                    ? "red"
-                    : "white",
-              }}
+              className={
+                item.randomChoiceColor === "Green"
+                  ? "text-green-500"
+                  : item.randomChoiceColor === "Red"
+                  ? "text-red-500"
+                  : item.randomChoiceColor === "Purple"
+                  ? "text-purple-400"
+                  : "text-white"
+              }
             >
               {item.randomChoiceColor || "-"}
             </div>
