@@ -36,7 +36,7 @@ const useWalletBalance = () => {
     fetchBalance();
   }, [fetchBalance]);
 
-  return { balance, loading, error, refetch: fetchBalance };
+  return { balance,setBalance, loading, error, refetch: fetchBalance };
 };
 
 export default useWalletBalance;

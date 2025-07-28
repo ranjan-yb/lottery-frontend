@@ -8,8 +8,7 @@ import useWalletBalance from "../hooks/useWalletBalance";
 function SecondLottery() {
   const API_URL = import.meta.env.VITE_REACT_APP_API_URL;
 
-
-   const { balance, loading, error, refetch } = useWalletBalance();
+  const { balance, loading, error, refetch } = useWalletBalance();
 
   const token = localStorage.getItem("token"); // ✅ Retrieve it properly
 
@@ -52,6 +51,11 @@ function SecondLottery() {
   // LAST SECONDS
   const [left25Sec, setLeft25Sec] = useState(false);
 
+  const lastPayload = useRef(null); // At top of component
+
+  // pause
+  const [isPaused, setIsPaused] = useState(true);
+
   // TIME REMAINING
   useEffect(() => {
     const str = String(timeLeft).padStart(2, "0");
@@ -59,39 +63,41 @@ function SecondLottery() {
     setSecondNumber(str[1]);
   }, [timeLeft]);
 
-  // COUNTDOWN
+  // COUNTDOWN FROM BACKEND
   useEffect(() => {
-    let timer;
-    if (isTimerRunning) {
-      timer = setInterval(() => {
-        setTimeLeft((prv) => {
-          if (prv <= 1) {
-            clearInterval(timer);
-            setIsTimerRunning(false);
-            setRestart(true);
-            return 0;
-          }
-          return prv - 1;
-        });
-      }, 1000);
-    }
-    // 🧼 Cleanup: Clear the timer on unmount or when effect reruns
-    return () => clearInterval(timer);
-  }, [isTimerRunning]);
+    const interval = setInterval(() => {
+      fetch(`${API_URL}/api/game/time`)
+        .then((res) => res.json())
+        .then((data) => {
+          setTimeLeft(data.timeLeft); // ← controlled by server
+          setIsPaused(data.isPaused);
+          // console.log("countdown from backend", data.isPaused);
+        })
+        .catch((err) => console.error("❌ Timer sync error", err));
+    }, 1000); // Sync every second
 
-  // RESTARTING COUNTDOWN AFTER 5 SECONDS
+    return () => clearInterval(interval);
+  }, []);
+
+  // restarting
+  useEffect(() => {
+    if (timeLeft === 0 && !restart) {
+      setRestart(true); // trigger 5s pause logic
+      setIsTimerRunning(false); // pause countdown UI
+    }
+  }, [timeLeft, restart]);
+
   useEffect(() => {
     if (!restart) return;
 
     const timeout = setTimeout(() => {
-      // sendSelectionToBackend(); // SENDING DATA TO BACKEND
-      handleRoundEnd(); // RESET SELECTIONS
-      setTimeLeft(30); // Reset to full time
-      setIsTimerRunning(true); // Start again
-      setRestart(false); // Reset flag
-    }, 5000);
+      handleRoundEnd(); // Clear user selections
+      setRestart(false);
+      setIsTimerRunning(true); // Resume UI timer if needed
+      // Do not setTimeLeft(30) — let backend send correct time
+    }, 1000);
 
-    return () => clearTimeout(timeout); // Cleanup timeout properly
+    return () => clearTimeout(timeout);
   }, [restart]);
 
   // FUNCTION FOR RESET SELECTION
@@ -110,10 +116,8 @@ function SecondLottery() {
     setLeft25Sec(false);
 
     resetGameStateBackend();
-
   };
 
-  const lastPayload = useRef(null); // At top of component
   // SEND SELECTED CHOICES TO BACKEND BY (post)
   const sendSelectionToBackend = async () => {
     const payload = {
@@ -196,6 +200,22 @@ function SecondLottery() {
     }
   };
 
+  // send choices to backend after everytime after round ends
+  useEffect(() => {
+    if (timeLeft === 0) {
+      sendSelectionToBackend();
+    }
+  }, [timeLeft]);
+
+  // CLEAR MESSAGE
+  useEffect(() => {
+    if (timeLeft === 30) {
+      setBigSmallResultMessage("");
+      setColorResultMessage("");
+      setNumberResultMessage("");
+    }
+  }, [timeLeft]);
+
   // RESET GAME BACKEND
   const resetGameStateBackend = async () => {
     try {
@@ -217,13 +237,6 @@ function SecondLottery() {
       console.error("❌ error in resetting game", error);
     }
   };
-
-  // send choices to backend after everytime after round ends
-  useEffect(() => {
-    if (timeLeft === 5) {
-      sendSelectionToBackend();
-    }
-  }, [timeLeft]);
 
   //FETCH GAME HISTORY
   // ✅ Fetch Game History with safety checks and optional UI updates
@@ -296,11 +309,11 @@ function SecondLottery() {
     }
   }, [timeLeft]);
 
-  // logout 
+  // logout
   const handleLogout = () => {
     localStorage.removeItem("token");
     window.location.href = "/login"; // Redirect to login page after logout
-  }
+  };
 
   return (
     <>
@@ -316,17 +329,20 @@ function SecondLottery() {
           </svg>
           Lottery
         </div>
-        <button 
-        onClick={handleLogout}
-        className="px-2 py-1 text-white rounded-lg text-lg bg-red-500">Logout</button>
+        <button
+          onClick={handleLogout}
+          className="px-2 py-1 text-white rounded-lg text-lg bg-red-500"
+        >
+          Logout
+        </button>
       </div>
-      
 
       {/* Wallet */}
       <div className="flex justify-center items-center mb-3 w-full px-4 mt-6 lg:mt-10 ">
         <div className="backdrop-blur-md bg-white/20 rounded-xl px-6 py-3 shadow-lg flex flex-col items-center w-full max-w-2xl">
           <span className="text-2xl font-bold text-gray-100 flex items-center mb-1">
-            <span className="mr-1">₹</span> {balance}
+            <span className="mr-1">₹</span>
+            {balance}
           </span>
           <span className="flex items-center text-gray-300 mb-2 text-sm">
             <i className="fas fa-wallet mr-1"></i> Wallet Balance
@@ -348,6 +364,7 @@ function SecondLottery() {
       {/* Countdown */}
       <div className="px-4 mb-3">
         <div className="flex justify-between items-center bg-gradient-to-r from-yellow-400 to-yellow-300 rounded-xl shadow-lg px-4 py-2 text-black">
+          {/* Left: Game Info + History */}
           <div className="flex flex-col space-y-1">
             <span className="text-sm font-semibold text-gray-900">
               WinGo 30sec
@@ -370,26 +387,28 @@ function SecondLottery() {
               </div>
             </div>
           </div>
+
+          {/* Right: Countdown */}
           <div className="flex flex-col items-end space-y-1">
             <span className="text-sm font-semibold text-gray-800">
               Time remaining
             </span>
             <div className="flex space-x-1">
               <span className="bg-black text-white px-2 py-1 font-bold rounded-sm text-lg leading-none">
-                0
+                {isPaused ? "0" : "0"}
               </span>
               <span className="bg-black text-white px-2 py-1 font-bold rounded-sm text-lg leading-none">
-                0
+                {isPaused ? "0" : "0"}
               </span>
               <span className="bg-black text-white px-2 py-1 font-bold rounded-sm text-lg leading-none">
-                {firstNumber}
+                {isPaused ? "0" : firstNumber}
               </span>
               <span
                 className={`bg-black px-2 py-1 font-bold rounded-sm text-lg leading-none ${
-                  timeLeft <= 5 ? "text-red-500" : "text-white"
+                  timeLeft <= 5 && !isPaused ? "text-red-500" : "text-white"
                 }`}
               >
-                {secondNumber}
+                {isPaused ? "0" : secondNumber}
               </span>
             </div>
           </div>
@@ -454,6 +473,8 @@ function SecondLottery() {
                 selectBigSmallRef.current = null;
 
                 setIsButtonDisabled(false);
+
+                localStorage.removeItem("storedBet"); // 🧹 Clear localStorage
               }}
               onConfirm={(amount) => {
                 setTotalAmount(amount);
