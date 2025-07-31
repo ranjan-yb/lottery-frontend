@@ -8,6 +8,7 @@ import useWalletBalance from "../hooks/useWalletBalance";
 function SecondLottery() {
   const API_URL = import.meta.env.VITE_REACT_APP_API_URL;
 
+   // WALLET
   const { balance, loading, error, refetch } = useWalletBalance();
 
   const token = localStorage.getItem("token"); // ✅ Retrieve it properly
@@ -51,10 +52,16 @@ function SecondLottery() {
   // LAST SECONDS
   const [left25Sec, setLeft25Sec] = useState(false);
 
-  const lastPayload = useRef(null); // At top of component
-
   // pause
   const [isPaused, setIsPaused] = useState(true);
+
+  const lastPayload = useRef(null); // At top of component
+
+  // TO CHECK IF USER PLACED A BET OR NOT
+  const betPlacedRef = useRef(false);
+
+  // TO DISABLE BETTING WHEN TIMELEFT <= 5
+  const [isSelectionAllowed, setIsSelectionAllowed] = useState(true);
 
   // TIME REMAINING
   useEffect(() => {
@@ -87,6 +94,7 @@ function SecondLottery() {
     }
   }, [timeLeft, restart]);
 
+  // RESTARTING COUNTDOWN AFTER 5 SECONDS
   useEffect(() => {
     if (!restart) return;
 
@@ -113,26 +121,32 @@ function SecondLottery() {
     colorAmountRef.current = null;
     numberAmountRef.current = null;
 
+    lastPayload.current = null;
+
     setLeft25Sec(false);
 
     resetGameStateBackend();
+
+    betPlacedRef.current = false;
   };
 
-  // SEND SELECTED CHOICES TO BACKEND BY (post)
-  const sendSelectionToBackend = async () => {
-    const payload = {
-      last5Sec: true,
-      last25Sec: false,
-    };
+  // user can place bet at any time
+  const handlePlaceBet = async () => {
+    if (!token) {
+      console.error("No token found.");
+      return;
+    }
+
+    const payload = {};
 
     if (selectBigSmallRef.current) {
       payload.userBigSmall = selectBigSmallRef.current;
-      payload.bigSmallAmount = Number(bigSmallAmountRef.current) || 0;
+      payload.bigSmallAmount = Number(bigSmallAmountRef.current);
     }
 
     if (selectedColorRef.current) {
       payload.userColor = selectedColorRef.current;
-      payload.colorAmount = Number(colorAmountRef.current) || 0;
+      payload.colorAmount = Number(colorAmountRef.current);
     }
 
     if (
@@ -140,13 +154,50 @@ function SecondLottery() {
       selectedNumberRef.current !== undefined
     ) {
       payload.userNumber = selectedNumberRef.current;
-      payload.numberAmount = Number(numberAmountRef.current) || 0;
+      payload.numberAmount = Number(numberAmountRef.current);
     }
 
-    console.log("📤 Sending /play payload:", payload);
+    try {
+      const res = await fetch(`${API_URL}/api/game/bet`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
 
-    // Save this for later use
-    lastPayload.current = payload;
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.msg || data.error || "Bet failed");
+
+      console.log("✅ Bet placed:", data.message || data.msg, payload);
+
+      // Update wallet immediately
+      refetch(); // custom hook to get updated wallet
+
+      // Save for /play
+      lastPayload.current = payload;
+      betPlacedRef.current = true;
+    } catch (error) {
+      console.log("❌ Error placing bet:", error.message);
+    }
+  };
+
+  // SEND EMPTY BET WHEN THERE IS NO USER
+  const sendEmptyBetToBackend = async () => {
+    const payload = {
+      last5Sec: true,
+      last25Sec: false,
+      userBigSmall: null,
+      bigSmallAmount: 0,
+      userColor: null,
+      colorAmount: 0,
+      userNumber: null,
+      numberAmount: 0,
+    };
+
+    console.log("📤 Sending EMPTY bet:", payload);
 
     try {
       const res = await fetch(`${API_URL}/api/game/play`, {
@@ -159,60 +210,95 @@ function SecondLottery() {
       });
 
       const data = await res.json();
-      console.log("✅ /play result:", data);
+      console.log("✅ Empty bet recorded:", data);
+    } catch (error) {
+      console.log("❌ Error sending empty bet:", error);
+    }
+  };
 
-      // ✅ Only show message if user placed that bet
+  // TRIGGER EMPTY BET
+  useEffect(() => {
+    if (timeLeft === 5 && !betPlacedRef.current) {
+      // Send empty bet payload
+      sendEmptyBetToBackend();
+    }
+  }, [timeLeft]);
+
+  // game result
+  const getBigSmallResult = async () => {
+    if (!betPlacedRef.current || !lastPayload.current) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/game/play`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ...lastPayload.current,
+          last5Sec: true,
+          last25Sec: false,
+        }),
+      });
+
+      const data = await res.json();
+      console.log("🎯 Game Result =", data);
+
+      // 💰 Refetch wallet after win
+      refetch();
+
+      // Set Big/Small result
       if (lastPayload.current.userBigSmall) {
         setBigSmallResultMessage(
-          data.bigSmallResult === "Win"
+          data.result === "Win"
             ? "🎉 You Win Big/Small!"
             : "❌ You Lost Big/Small"
         );
       } else {
-        setBigSmallResultMessage(""); // clear
+        setBigSmallResultMessage("");
       }
 
+      // Set Color result
       if (lastPayload.current.userColor) {
         setColorResultMessage(
-          data.colorResult === "Win" ? "🎉 You Win Color!" : "❌ You Lost Color"
+          data.randomChoiceColor === lastPayload.current.userColor
+            ? "🎉 You Win Color!"
+            : "❌ You Lost Color"
         );
       } else {
         setColorResultMessage("");
       }
 
-      if (
-        lastPayload.current.userNumber !== undefined &&
-        lastPayload.current.userNumber !== null
-      ) {
+      // Set Number result
+      if (lastPayload.current.userNumber) {
         setNumberResultMessage(
-          data.numberResult === "Win"
-            ? "🎉 You Win in Number"
-            : "❌ You Lost in Number"
+          data.randomChoiceNumber === lastPayload.current.userNumber
+            ? "🎉 You Win Number!"
+            : "❌ You Lost Number"
         );
       } else {
         setNumberResultMessage("");
       }
 
-      await fetchGameHistory(); // refresh results
-      await refetch(); // update wallet
+      // Clear bet state
+      betPlacedRef.current = false;
+      lastPayload.current = null;
     } catch (error) {
-      console.log("❌ Error sending /play:", error);
+      console.log("❌ Error fetching result:", error.message);
     }
   };
 
-  // send choices to backend after everytime after round ends
   useEffect(() => {
-    if (timeLeft === 0) {
-      sendSelectionToBackend();
+    if (timeLeft === 1) {
+      getBigSmallResult();
     }
   }, [timeLeft]);
 
-  // CLEAR MESSAGE
+  // useeffect to fetch game result
   useEffect(() => {
-    if (timeLeft === 30) {
-      setBigSmallResultMessage("");
-      setColorResultMessage("");
-      setNumberResultMessage("");
+    if (timeLeft === 0) {
+      fetchGameHistory();
     }
   }, [timeLeft]);
 
@@ -232,28 +318,26 @@ function SecondLottery() {
       }
 
       const data = await res.json();
-      console.log("✅ Game reset:", data);
+      // console.log("✅ Game reset:", data);
     } catch (error) {
       console.error("❌ error in resetting game", error);
     }
   };
 
   //FETCH GAME HISTORY
-  // ✅ Fetch Game History with safety checks and optional UI updates
   const fetchGameHistory = async (page = 1) => {
     try {
       const res = await fetch(
-        `${API_URL}/api/game/history?page=${page}`
+        `http://localhost:1000/api/game/history?page=${page}`
       );
       if (!res.ok) throw new Error(`Server responded with ${res.status}`);
 
       const data = await res.json();
-      console.log("📜 Fetched History:", data);
 
       if (Array.isArray(data.history)) {
         setGameHistory(data.history);
         setTotalPages(data.totalPages || 1);
-        setCurrentPage(data.currentPage || 1);
+        setCurrentPage(data.currentPage || 1); // ✅ this was missing!
       } else {
         console.warn("❌ Unexpected history format:", data);
         setGameHistory([]);
@@ -263,11 +347,6 @@ function SecondLottery() {
       setGameHistory([]);
     }
   };
-
-  //USESTATE FOR FETCHING HISTORY
-  useEffect(() => {
-    fetchGameHistory(currentPage);
-  }, [currentPage]);
 
   // RESULT POPUP MESSAGE
   useEffect(() => {
@@ -309,7 +388,22 @@ function SecondLottery() {
     }
   }, [timeLeft]);
 
-  // logout
+  // THIS IS FOR PAGINATION
+  useEffect(() => {
+    fetchGameHistory(currentPage);
+  }, [currentPage]);
+
+  // DISABEL SELECTION WHEN TIME === 5
+  useEffect(() => {
+    if (timeLeft > 5) {
+      setIsSelectionAllowed(true);
+    } else {
+      setIsSelectionAllowed(false);
+    }
+  }, [timeLeft]);
+
+
+    // logout
   const handleLogout = () => {
     localStorage.removeItem("token");
     window.location.href = "/login"; // Redirect to login page after logout
@@ -473,8 +567,6 @@ function SecondLottery() {
                 selectBigSmallRef.current = null;
 
                 setIsButtonDisabled(false);
-
-                localStorage.removeItem("storedBet"); // 🧹 Clear localStorage
               }}
               onConfirm={(amount) => {
                 setTotalAmount(amount);
@@ -499,6 +591,9 @@ function SecondLottery() {
                 ) {
                   numberAmountRef.current = amount;
                 }
+
+                // ✅ Now place bet
+                handlePlaceBet();
               }}
             />
           </div>
@@ -507,11 +602,12 @@ function SecondLottery() {
       {/* <!-- 🎨 Color Buttons --> */}
       <div className="flex gap-2 justify-center mb-4">
         <button
+        disabled={!isSelectionAllowed}
           className={`bg-green-400 text-white font-semibold px-6 py-2 rounded shadow ${
-            selectedColor === "Green" ? "ring-4 ring-green-100" : ""
+            selectedColor === "Green" ? "ring-4 ring-green-100" : "disabled:opacity-50 disabled:cursor-not-allowed"
           }`}
           onClick={() => {
-            if (selectedColorRef.current) return;
+            if (!isSelectionAllowed || selectedColorRef.current) return;
             selectedColorRef.current = "Green";
             setSelectedColor("Green");
             setShowAmountBox(true); // <-- ✅ Show amount
@@ -520,11 +616,12 @@ function SecondLottery() {
           Green
         </button>
         <button
+        disabled={!isSelectionAllowed}
           className={`bg-purple-600 text-white font-semibold px-6 py-2 rounded shadow ${
-            selectedColor === "Purple" ? "ring-4 ring-purple-300" : ""
+            selectedColor === "Purple" ? "ring-4 ring-purple-300" : "disabled:opacity-50 disabled:cursor-not-allowed"
           }`}
           onClick={() => {
-            if (selectedColorRef.current) return;
+            if (!isSelectionAllowed || selectedColorRef.current) return;
             selectedColorRef.current = "Purple";
             setSelectedColor("Purple");
             setShowAmountBox(true); // <-- ✅ Show amount
@@ -533,11 +630,12 @@ function SecondLottery() {
           Purple
         </button>
         <button
+        disabled={!isSelectionAllowed}
           className={`bg-red-600 text-white font-semibold px-6 py-2 rounded shadow ${
-            selectedColor === "Red" ? "ring-4 ring-red-300" : ""
+            selectedColor === "Red" ? "ring-4 ring-red-300" : "disabled:opacity-50 disabled:cursor-not-allowed"
           }`}
           onClick={() => {
-            if (selectedColorRef.current) return;
+            if (!isSelectionAllowed || selectedColorRef.current) return;
             selectedColorRef.current = "Red";
             setSelectedColor("Red");
             setShowAmountBox(true); // <-- ✅ Show amount
@@ -552,27 +650,26 @@ function SecondLottery() {
           {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
             <button
               key={num}
+              disabled={!isSelectionAllowed}
               className={`w-14 h-14 flex items-center justify-center rounded-full text-lg font-bold transition-all duration-200
-        ${
-          selectedNumber === num
-            ? "ring-4 ring-pink-400 bg-yellow-300 text-black"
-            : ""
-        }
-      `}
+    ${selectedNumber === num ? "ring-4 ring-pink-400 bg-yellow-300" : ""}
+    ${!isSelectionAllowed ? "opacity-50 cursor-not-allowed" : "hover:scale-105"}
+  `}
               style={{
                 background:
                   selectedNumber === num
-                    ? undefined // Remove gradient on selection
+                    ? undefined
                     : "radial-gradient(circle at center, #ffffff 30%, #ff4d4d 40%, #a100ff 70%)",
                 boxShadow:
                   "inset 0 0 10px rgba(255,255,255,0.5), 0 0 10px rgba(0,0,0,0.5)",
                 color: selectedNumber === num ? "#000000" : "#a100ff",
               }}
               onClick={() => {
-                if (selectedNumberRef.current !== null) return;
+                if (!isSelectionAllowed || selectedNumberRef.current !== null)
+                  return;
                 selectedNumberRef.current = num;
                 setSelectedNumber(num);
-                setShowAmountBox(true); // <-- ✅ Show amount
+                setShowAmountBox(true);
               }}
             >
               {num}
@@ -585,28 +682,32 @@ function SecondLottery() {
       <div className="bg-white/10 backdrop-blur-md rounded-2xl px-6 py-4 mx-4 mb-6 shadow-lg space-y-6">
         <div className="flex justify-center gap-4">
           <button
+            disabled={!isSelectionAllowed}
             className={`w-32 py-2 rounded-l-full font-semibold transition ${
               selectBigSmallRef.current === "Big"
                 ? "ring-4 ring-orange-300 bg-orange-500"
-                : "bg-orange-500 text-white hover:bg-orange-600"
+                : "bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
             }`}
             onClick={() => {
-              if (selectBigSmallRef.current) return;
-              selectBigSmallRef.current = "Big"; // 🔥 Add this line
+              if (!isSelectionAllowed || selectBigSmallRef.current) return;
+
+              selectBigSmallRef.current = "Big";
               setSelectedBigSmall("Big");
               setShowAmountBox(true);
             }}
           >
             Big
           </button>
+
           <button
+            disabled={!isSelectionAllowed}
             className={`w-32 py-2 rounded-r-full font-semibold transition ${
               selectBigSmallRef.current === "Small"
                 ? "ring-4 ring-blue-300 bg-blue-500"
-                : "bg-blue-500 text-white hover:bg-blue-600"
+                : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
             }`}
             onClick={() => {
-              if (selectBigSmallRef.current) return;
+              if (!isSelectionAllowed || selectBigSmallRef.current) return;
               selectBigSmallRef.current = "Small"; // 🔥 Add this line
               setSelectedBigSmall("Small");
               setShowAmountBox(true);
@@ -616,6 +717,7 @@ function SecondLottery() {
           </button>
         </div>
       </div>
+
 
       <div className="w-full px-4" id="result-section">
         <h3 className="text-white mb-4">Game History</h3>
