@@ -328,7 +328,7 @@ function SecondLottery() {
   const fetchGameHistory = async (page = 1) => {
     try {
       const res = await fetch(
-        `http://localhost:1000/api/game/history?page=${page}`
+        `${API_URL}/api/game/history?page=${page}`
       );
       if (!res.ok) throw new Error(`Server responded with ${res.status}`);
 
