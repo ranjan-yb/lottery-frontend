@@ -262,7 +262,7 @@ function SecondLottery() {
       // Set Color result
       if (lastPayload.current.userColor) {
         setColorResultMessage(
-          data.randomChoiceColor === lastPayload.current.userColor
+          data.winnerColor === lastPayload.current.userColor
             ? "🎉 You Win Color!"
             : "❌ You Lost Color"
         );
@@ -273,7 +273,7 @@ function SecondLottery() {
       // Set Number result
       if (lastPayload.current.userNumber) {
         setNumberResultMessage(
-          data.randomChoiceNumber === lastPayload.current.userNumber
+          data.winnerNumber === lastPayload.current.userNumber
             ? "🎉 You Win Number!"
             : "❌ You Lost Number"
         );
